@@ -15,6 +15,7 @@ struct GoalController: RouteCollection {
         let goalRoutes = routes.grouped("goals")
         goalRoutes.post("create", use: create)
         goalRoutes.post("update", use: update)
+        goalRoutes.delete(use: delete)
         goalRoutes.get("all", use: getAll)
         goalRoutes.group(":GoalId") { goal in
             goal.delete(use: delete)
@@ -26,7 +27,8 @@ struct GoalController: RouteCollection {
             throw Abort(.notFound)
         }
         try await goal.delete(on: req.db)
-        return .noContent
+        print("DELETED GOAL \(goal.id!)")
+        return .ok
     }
     
     func create(req: Request) async throws -> Goal {
@@ -40,14 +42,20 @@ struct GoalController: RouteCollection {
 
     func update(req: Request) async throws -> Goal {
         let updated = try req.content.decode(Goal.self)
-        let goalModel = updated.makeGoalModel()
-        try await goalModel.update(on: req.db)
+        guard let goalModel = try await GoalModel.find(updated.id, on: req.db) else {
+            throw Abort(.custom(code: 404, reasonPhrase: "The goal you're trying to update doesn't exist."))
+        }
+        goalModel.goal = updated.target
+        goalModel.progress = updated.progress
+        goalModel.type = updated.type.rawValue
+        goalModel.date = updated.dueDate
+        goalModel.title = updated.title
+        try await goalModel.save(on: req.db)
         return try Goal(model: try await GoalModel.getSingleByID(updated.id, on: req.db))
     }
     
     func getAll(req: Request) async throws -> [Goal] {
-        let Goals = try await GoalModel.getAll(on: req.db).map(Goal.init)
-        return Goals
+        try await GoalModel.query(on: req.db).all().map(Goal.init)
     }
     
 }
@@ -73,8 +81,4 @@ extension GoalModel {
         return model
     }
     
-    static func getAll(on database: Database) async throws -> [GoalModel] {
-        try await GoalModel.query(on: database)
-            .all()
-    }
 }
